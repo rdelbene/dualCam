@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <SurfaceView
+        android:id="@+id/surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        android:id="@+id/info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="8dp"
+        android:background="#99000000"
+        android:padding="6dp"
+        android:text="Buscando lentes…"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/panel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_margin="8dp"
+        android:background="#66000000"
+        android:orientation="vertical"
+        android:padding="4dp">
+
+        <Button android:id="@+id/btnPhoto" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Foto 3D" />
+        <Button android:id="@+id/btnRecord" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="● Grabar" />
+        <Button android:id="@+id/btnPair" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Lentes" />
+        <Button android:id="@+id/btnSwap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Izq ⇄ Der" />
+        <Button android:id="@+id/btnRotate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Girar" />
+    </LinearLayout>
+</FrameLayout>
