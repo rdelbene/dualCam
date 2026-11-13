@@ -24,6 +24,7 @@ Requiere Android 10 o superior y un celular que exponga sus lentes físicos (por
 - **Lentes**: cambia el par de lentes. Arranca con el par de campo de visión más parecido (principal + gran angular). El lente más angular se recorta para igualar el encuadre del otro.
 - **Izq ⇄ Der**: si el 3D se ve raro (cansa la vista o lo cercano parece lejos), los ojos están invertidos. Tocalo.
 - **Girar**: si la imagen sale rotada, tocalo hasta que quede derecha.
+- **Ajustes**: panel de calibración. Elegí qué ojo editar y mové su imagen (← → y ↓ ↑), rotala de a 0,1° o cambiá el zoom. **Separación** aleja o acerca las dos imágenes entre sí. **Líneas guía** muestra líneas para alinear (no salen en fotos ni videos). Los ajustes se guardan por par de lentes y se aplican a la vista en vivo, las fotos y los videos.
 - **Tocar la imagen** oculta los controles. Con el celular dentro de unos lentes VR tipo cardboard, ves el 3D en vivo.
 
 ## Para ver en VR

@@ -36,5 +36,23 @@
         <Button android:id="@+id/btnPair" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Lentes" />
         <Button android:id="@+id/btnSwap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Izq ⇄ Der" />
         <Button android:id="@+id/btnRotate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Girar" />
+        <Button android:id="@+id/btnSettings" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ajustes" />
     </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/settings"
+        android:layout_width="match_parent"
+        android:layout_height="210dp"
+        android:layout_gravity="bottom"
+        android:layout_marginEnd="140dp"
+        android:background="#AA000000"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/settingsBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="6dp" />
+    </ScrollView>
 </FrameLayout>

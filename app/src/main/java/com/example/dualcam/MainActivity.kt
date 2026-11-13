@@ -51,6 +51,15 @@ class MainActivity : Activity() {
     private lateinit var btnPair: Button
     private lateinit var btnSwap: Button
     private lateinit var btnRotate: Button
+    private lateinit var btnSettings: Button
+    private lateinit var settings: View
+    private lateinit var settingsBox: LinearLayout
+
+    // Calibración: se guarda por par de lentes.
+    private val prefs by lazy { getSharedPreferences("calibracion", MODE_PRIVATE) }
+    @Volatile private var pairKey = ""
+    private var editLeft = true
+    private val refreshers = mutableListOf<() -> Unit>()
 
     private val manager by lazy { getSystemService(CAMERA_SERVICE) as CameraManager }
     private val camThread = HandlerThread("camera").apply { start() }
@@ -89,6 +98,9 @@ class MainActivity : Activity() {
         btnPair = findViewById(R.id.btnPair)
         btnSwap = findViewById(R.id.btnSwap)
         btnRotate = findViewById(R.id.btnRotate)
+        btnSettings = findViewById(R.id.btnSettings)
+        settings = findViewById(R.id.settings)
+        settingsBox = findViewById(R.id.settingsBox)
 
         findCameras()
 
@@ -96,6 +108,12 @@ class MainActivity : Activity() {
             surfaceA = Surface(stA)
             surfaceB = Surface(stB)
             runOnUiThread { maybeOpenCamera() }
+        }
+        renderer.quarterTurns = prefs.getInt("giro", 1)
+        buildSettings()
+        btnSettings.setOnClickListener {
+            settings.visibility = if (settings.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            refreshRows()
         }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -125,11 +143,158 @@ class MainActivity : Activity() {
         }
         btnSwap.setOnClickListener {
             renderer.swapEyes = !renderer.swapEyes
+            saveCalibration()
             updateInfo()
+            refreshRows()
         }
         btnRotate.setOnClickListener {
-            if (!recording) renderer.quarterTurns = (renderer.quarterTurns + 1) % 4
+            if (!recording) {
+                renderer.quarterTurns = (renderer.quarterTurns + 1) % 4
+                prefs.edit().putInt("giro", renderer.quarterTurns).apply()
+            }
         }
+    }
+
+    // ---------- Panel de ajustes / calibración ----------
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).roundToInt()
+
+    /** Lente (0 = A, 1 = B) que se está mostrando del lado que se edita. */
+    private fun editedCam(): Int {
+        val leftCam = if (renderer.swapEyes) 1 else 0
+        return if (editLeft) leftCam else 1 - leftCam
+    }
+
+    private fun currentAdj(): StereoRenderer.EyeAdjust =
+        if (editedCam() == 0) renderer.adjA else renderer.adjB
+
+    private fun setAdj(a: StereoRenderer.EyeAdjust) {
+        if (editedCam() == 0) renderer.adjA = a else renderer.adjB = a
+    }
+
+    private fun smallButton(label: String, onClick: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        minWidth = dp(44)
+        minimumWidth = dp(44)
+        setOnClickListener { onClick() }
+    }
+
+    private fun buildSettings() {
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        lateinit var bEye: Button
+        bEye = smallButton("Editando: ojo IZQ") {
+            editLeft = !editLeft
+            bEye.text = if (editLeft) "Editando: ojo IZQ" else "Editando: ojo DER"
+            refreshRows()
+        }
+        top.addView(bEye)
+        top.addView(smallButton("Líneas guía") { renderer.showGuides = !renderer.showGuides })
+        top.addView(smallButton("Restablecer") {
+            renderer.adjA = StereoRenderer.EyeAdjust()
+            renderer.adjB = StereoRenderer.EyeAdjust()
+            renderer.separation = 0f
+            saveCalibration()
+            refreshRows()
+        })
+        top.addView(smallButton("Cerrar") { settings.visibility = View.GONE })
+        settingsBox.addView(top)
+
+        val pct = { v: Int -> String.format(Locale.US, "%+.1f%%", v / 10f) }
+        addRow("Separación (ambos)", -300, 300, pct,
+            { (renderer.separation * 1000).roundToInt() },
+            { renderer.separation = it / 1000f })
+        addRow("Mover ← →", -300, 300, pct,
+            { (currentAdj().dx * 1000).roundToInt() },
+            { setAdj(currentAdj().copy(dx = it / 1000f)) })
+        addRow("Mover ↓ ↑", -300, 300, pct,
+            { (currentAdj().dy * 1000).roundToInt() },
+            { setAdj(currentAdj().copy(dy = it / 1000f)) })
+        addRow("Rotar", -200, 200, { v -> String.format(Locale.US, "%+.1f°", v / 10f) },
+            { (currentAdj().rotDeg * 10).roundToInt() },
+            { setAdj(currentAdj().copy(rotDeg = it / 10f)) })
+        addRow("Zoom", 700, 1400, { v -> String.format(Locale.US, "%.1f%%", v / 10f) },
+            { (currentAdj().zoom * 1000).roundToInt() },
+            { setAdj(currentAdj().copy(zoom = it / 1000f)) })
+    }
+
+    private fun addRow(name: String, min: Int, max: Int, fmt: (Int) -> String, get: () -> Int, set: (Int) -> Unit) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        val label = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 12f
+            width = dp(150)
+        }
+        val seek = android.widget.SeekBar(this).apply { this.max = max - min }
+        fun show(v: Int) { label.text = "$name: ${fmt(v)}" }
+        fun applyValue(v: Int) {
+            val c = v.coerceIn(min, max)
+            set(c)
+            show(c)
+            saveCalibration()
+        }
+        seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: android.widget.SeekBar, p: Int, fromUser: Boolean) {
+                if (fromUser) applyValue(p + min)
+            }
+            override fun onStartTrackingTouch(s: android.widget.SeekBar) {}
+            override fun onStopTrackingTouch(s: android.widget.SeekBar) {}
+        })
+        val minus = smallButton("−") {
+            val v = (get() - 1).coerceIn(min, max)
+            applyValue(v)
+            seek.progress = v - min
+        }
+        val plus = smallButton("+") {
+            val v = (get() + 1).coerceIn(min, max)
+            applyValue(v)
+            seek.progress = v - min
+        }
+        row.addView(label)
+        row.addView(minus)
+        row.addView(seek, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(plus)
+        settingsBox.addView(row)
+        refreshers += {
+            val v = get().coerceIn(min, max)
+            seek.progress = v - min
+            show(v)
+        }
+    }
+
+    private fun refreshRows() = runOnUiThread { refreshers.forEach { it() } }
+
+    private fun loadCalibration() {
+        val k = pairKey
+        fun adj(c: String) = StereoRenderer.EyeAdjust(
+            prefs.getFloat("${k}_${c}_dx", 0f),
+            prefs.getFloat("${k}_${c}_dy", 0f),
+            prefs.getFloat("${k}_${c}_rot", 0f),
+            prefs.getFloat("${k}_${c}_zoom", 1f)
+        )
+        renderer.adjA = adj("A")
+        renderer.adjB = adj("B")
+        renderer.separation = prefs.getFloat("${k}_sep", 0f)
+        renderer.swapEyes = prefs.getBoolean("${k}_swap", false)
+        refreshRows()
+    }
+
+    private fun saveCalibration() {
+        val k = pairKey
+        if (k.isEmpty()) return
+        val e = prefs.edit()
+        for ((c, a) in listOf("A" to renderer.adjA, "B" to renderer.adjB)) {
+            e.putFloat("${k}_${c}_dx", a.dx)
+            e.putFloat("${k}_${c}_dy", a.dy)
+            e.putFloat("${k}_${c}_rot", a.rotDeg)
+            e.putFloat("${k}_${c}_zoom", a.zoom)
+        }
+        e.putFloat("${k}_sep", renderer.separation)
+        e.putBoolean("${k}_swap", renderer.swapEyes)
+        e.apply()
     }
 
     override fun onResume() {
@@ -283,6 +448,8 @@ class MainActivity : Activity() {
         renderer.setCrop((m / ra).toFloat(), (m / rb).toFloat())
         labelA = lensLabel(a)
         labelB = lensLabel(b)
+        pairKey = "${a}_${b}"
+        loadCalibration()
 
         val callback = object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(s: CameraCaptureSession) {
@@ -426,6 +593,8 @@ class MainActivity : Activity() {
         btnPair.isEnabled = !on
         btnRotate.isEnabled = !on
         btnPhoto.isEnabled = !on
+        if (on) settings.visibility = View.GONE
+        btnSettings.isEnabled = !on
     }
 
     // ---------- Utilidades ----------

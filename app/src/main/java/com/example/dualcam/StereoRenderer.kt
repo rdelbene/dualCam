@@ -55,6 +55,16 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
     /** Cuartos de vuelta extra aplicados a la imagen (1 = apaisado normal). */
     @Volatile var quarterTurns = 1
 
+    /** Ajuste fino de cada lente: desplazamiento (fracción del ancho/alto), rotación (grados) y zoom. */
+    data class EyeAdjust(val dx: Float = 0f, val dy: Float = 0f, val rotDeg: Float = 0f, val zoom: Float = 1f)
+
+    @Volatile var adjA = EyeAdjust()
+    @Volatile var adjB = EyeAdjust()
+    /** Separación horizontal entre las dos imágenes (fracción del ancho de cada ojo). */
+    @Volatile var separation = 0f
+    /** Líneas guía para alinear (solo en pantalla, no se guardan en fotos ni videos). */
+    @Volatile var showGuides = false
+
     private var program = 0
     private var aPos = 0
     private var aTc = 0
@@ -277,18 +287,52 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
         }
         val eyeW = cw / 2
         val left = if (swapEyes) 1 else 0
-        drawEye(x0, y0, eyeW, ch, left)
-        drawEye(x0 + eyeW, y0, eyeW, ch, 1 - left)
+        drawEye(x0, y0, eyeW, ch, left, side = 0)
+        drawEye(x0 + eyeW, y0, eyeW, ch, 1 - left, side = 1)
+        if (letterbox && showGuides) drawGuides(x0, y0, cw, ch)
     }
 
-    private fun drawEye(x: Int, y: Int, w: Int, h: Int, cam: Int) {
+    /** Dibuja líneas finas usando recortes (scissor) + clear: horizontales y el centro de cada ojo. */
+    private fun drawGuides(x0: Int, y0: Int, cw: Int, ch: Int) {
+        GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glClearColor(0.2f, 1f, 0.4f, 1f)
+        for (k in 1..7) {
+            val y = y0 + ch * k / 8
+            GLES20.glScissor(x0, y - 1, cw, 2)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        }
+        val eyeW = cw / 2
+        for (e in 0..1) {
+            val x = x0 + e * eyeW + eyeW / 2
+            GLES20.glScissor(x - 1, y0, 2, ch)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        }
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+    }
+
+    private fun drawEye(x: Int, y: Int, w: Int, h: Int, cam: Int, side: Int) {
         GLES20.glViewport(x, y, w, h)
         val crop = if (cam == 0) cropA else cropB
         val mtx = if (cam == 0) mtxA else mtxB
+        val adj = if (cam == 0) adjA else adjB
+        val shift = if (side == 0) -separation / 2f else separation / 2f
+        val aspect = w.toFloat() / h
+        val th = Math.toRadians(-adj.rotDeg.toDouble())
+        val cs = kotlin.math.cos(th).toFloat()
+        val sn = kotlin.math.sin(th).toFloat()
+        val zoom = if (adj.zoom < 0.1f) 0.1f else adj.zoom
         val q = quarterTurns and 3
         for (i in 0 until 4) {
-            val sx = if (i == 1 || i == 3) 1f else 0f
-            val sy = if (i >= 2) 1f else 0f
+            val sx0 = if (i == 1 || i == 3) 1f else 0f
+            val sy0 = if (i >= 2) 1f else 0f
+            // Desplazar, rotar (corrigiendo el aspecto) y hacer zoom alrededor del centro.
+            val px = sx0 - adj.dx - shift - 0.5f
+            val py = sy0 - adj.dy - 0.5f
+            val rx = (cs * px * aspect - sn * py) / aspect
+            val ry = sn * px * aspect + cs * py
+            val sx = rx / zoom + 0.5f
+            val sy = ry / zoom + 0.5f
             val u: Float
             val v: Float
             when (q) {
@@ -323,18 +367,25 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
             attribute vec2 aTc;
             uniform mat4 uSt;
             varying vec2 vTc;
+            varying vec2 vRaw;
             void main() {
                 gl_Position = vec4(aPos, 0.0, 1.0);
+                vRaw = aTc;
                 vTc = (uSt * vec4(aTc, 0.0, 1.0)).xy;
             }
         """.trimIndent()
         val fs = """
             #extension GL_OES_EGL_image_external : require
-            precision mediump float;
+            precision highp float;
             uniform samplerExternalOES uTex;
             varying vec2 vTc;
+            varying vec2 vRaw;
             void main() {
-                gl_FragColor = texture2D(uTex, vTc);
+                if (vRaw.x < 0.0 || vRaw.x > 1.0 || vRaw.y < 0.0 || vRaw.y > 1.0) {
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                } else {
+                    gl_FragColor = texture2D(uTex, vTc);
+                }
             }
         """.trimIndent()
         program = GLES20.glCreateProgram()
