@@ -64,6 +64,8 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
     @Volatile var separation = 0f
     /** Líneas guía para alinear (solo en pantalla, no se guardan en fotos ni videos). */
     @Volatile var showGuides = false
+    /** Enderezado automático: grados (antihorario) que se giran los dos ojos para compensar la inclinación del celular. */
+    @Volatile var levelDeg = 0f
 
     private var program = 0
     private var aPos = 0
@@ -329,10 +331,14 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
         val adj = if (cam == 0) adjA else adjB
         val shift = if (side == 0) -separation / 2f else separation / 2f
         val aspect = w.toFloat() / h
-        val th = Math.toRadians(-adj.rotDeg.toDouble())
+        val lv = levelDeg
+        val th = Math.toRadians(-(adj.rotDeg + lv).toDouble())
         val cs = kotlin.math.cos(th).toFloat()
         val sn = kotlin.math.sin(th).toFloat()
-        val zoom = if (adj.zoom < 0.1f) 0.1f else adj.zoom
+        // al girar, se agranda lo justo para que no queden esquinas negras
+        val la = Math.toRadians(kotlin.math.abs(lv).toDouble())
+        val fill = (kotlin.math.cos(la) + kotlin.math.max(aspect, 1f / aspect) * kotlin.math.sin(la)).toFloat()
+        val zoom = (if (adj.zoom < 0.1f) 0.1f else adj.zoom) * fill
         val q = quarterTurns and 3
         for (i in 0 until 4) {
             val sx0 = if (i == 1 || i == 3) 1f else 0f

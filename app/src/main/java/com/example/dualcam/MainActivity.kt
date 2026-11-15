@@ -55,6 +55,7 @@ class MainActivity : Activity() {
     private lateinit var settings: View
     private lateinit var settingsBox: LinearLayout
     private lateinit var level: LevelView
+    private var btnLevelRef: Button? = null
 
     /** Lentes fijos: el 2 (principal) a la izquierda y el 5 (tele) a la derecha. No se pueden cambiar. */
     private val LEFT_LENS = "2"
@@ -117,7 +118,25 @@ class MainActivity : Activity() {
         renderer.quarterTurns = prefs.getInt("giro", 1)
 
         // nivel sobre los dos ojos (encima de la imagen, debajo de los botones)
-        level = LevelView(this) { w, h -> renderer.eyeRects(w, h) }
+        level = LevelView(this, { w, h -> renderer.eyeRects(w, h) }) { t ->
+            renderer.levelDeg = if (level.auto && kotlin.math.abs(t) <= LevelView.MAX_AUTO) t else 0f
+        }
+        level.auto = prefs.getBoolean("auto_nivel", false)
+        // botón Enderezar (automático), debajo de Girar
+        val btnLevel = Button(this).apply {
+            isAllCaps = false
+            fun show() { text = if (level.auto) "Enderezar: SÍ" else "Enderezar: NO" }
+            show()
+            setOnClickListener {
+                if (recording) return@setOnClickListener
+                level.auto = !level.auto
+                if (!level.auto) renderer.levelDeg = 0f
+                prefs.edit().putBoolean("auto_nivel", level.auto).apply()
+                show(); level.invalidate()
+            }
+        }
+        panel.addView(btnLevel, panel.indexOfChild(btnRotate) + 1)
+        btnLevelRef = btnLevel
         (surfaceView.parent as android.widget.FrameLayout).addView(level, 1,
             android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT))
         // lentes fijos: sin cambiar par ni invertir ojos
@@ -603,6 +622,7 @@ class MainActivity : Activity() {
         btnRecord.text = if (on) "■ Detener" else "● Grabar"
         btnPair.isEnabled = !on
         btnRotate.isEnabled = !on
+        btnLevelRef?.isEnabled = !on
         btnPhoto.isEnabled = !on
         if (on) settings.visibility = View.GONE
         btnSettings.isEnabled = !on

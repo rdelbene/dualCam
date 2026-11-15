@@ -20,7 +20,9 @@ import kotlin.math.atan2
  * dónde está el horizonte real según el sensor de gravedad. Cuando el celular está derecho (±0,5°)
  * las dos coinciden y se ponen verdes. Solo se ve en pantalla: no sale en fotos ni videos.
  */
-class LevelView(ctx: Context, private val eyes: (Int, Int) -> Pair<RectF, RectF>) : View(ctx), SensorEventListener {
+class LevelView(ctx: Context, private val eyes: (Int, Int) -> Pair<RectF, RectF>, private val onTilt: (Float) -> Unit) : View(ctx), SensorEventListener {
+    /** Con el enderezado automático la imagen ya sale derecha: se muestra solo cuánto se está corrigiendo. */
+    var auto = false
     private val sm = ctx.getSystemService(SensorManager::class.java)
     private var tilt = 0f          // grados que está girado el celular respecto del piso
     private var have = false
@@ -42,7 +44,7 @@ class LevelView(ctx: Context, private val eyes: (Int, Int) -> Pair<RectF, RectF>
 
     override fun onSensorChanged(e: SensorEvent) {
         // filtro suave para que la línea no tiemble
-        val k = if (have) 0.2f else 1f
+        val k = if (have) (if (auto) 0.1f else 0.2f) else 1f
         gx += (e.values[0] - gx) * k; gy += (e.values[1] - gy) * k; have = true
         val rot = when (display?.rotation ?: Surface.ROTATION_90) {
             Surface.ROTATION_90 -> 90f; Surface.ROTATION_180 -> 180f; Surface.ROTATION_270 -> 270f; else -> 0f
@@ -51,6 +53,7 @@ class LevelView(ctx: Context, private val eyes: (Int, Int) -> Pair<RectF, RectF>
         while (t > 180f) t -= 360f
         while (t <= -180f) t += 360f
         tilt = t
+        onTilt(t)
         invalidate()
     }
 
@@ -62,6 +65,19 @@ class LevelView(ctx: Context, private val eyes: (Int, Int) -> Pair<RectF, RectF>
         val ok = abs(tilt) <= 0.5f
         val col = when { ok -> Color.rgb(60, 230, 110); abs(tilt) <= 2f -> Color.rgb(255, 200, 40); else -> Color.rgb(255, 90, 70) }
         lineP.color = col; txtP.color = col
+        if (auto) {
+            val over = abs(tilt) > MAX_AUTO
+            txtP.color = if (over) Color.rgb(255, 90, 70) else Color.rgb(60, 230, 110)
+            for (eye in listOf(l, r)) {
+                txtP.textSize = eye.height() * 0.05f
+                val s = if (over) "Enderezar: más de ${MAX_AUTO.toInt()}°, enderezá el celular" else String.format(Locale("es"), "Enderezado auto %+.1f°", -tilt)
+                val tx = eye.centerX(); val ty = eye.bottom - eye.height() * 0.06f
+                val tw = txtP.measureText(s) / 2 + 12f
+                c.drawRoundRect(RectF(tx - tw, ty - txtP.textSize, tx + tw, ty + txtP.textSize * 0.35f), 12f, 12f, bgP)
+                c.drawText(s, tx, ty, txtP)
+            }
+            return
+        }
         for (eye in listOf(l, r)) {
             val cx = eye.centerX(); val cy = eye.centerY()
             val half = eye.width() * 0.32f
@@ -82,4 +98,6 @@ class LevelView(ctx: Context, private val eyes: (Int, Int) -> Pair<RectF, RectF>
             c.drawText(s, cx, ty, txtP)
         }
     }
+
+    companion object { const val MAX_AUTO = 15f }
 }
