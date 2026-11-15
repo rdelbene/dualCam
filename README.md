@@ -21,8 +21,8 @@ Requiere Android 10 o superior y un celular que exponga sus lentes físicos (por
 
 ## Uso
 - La app se usa **en horizontal**, así los lentes, que en vertical están uno encima del otro, quedan uno al lado del otro.
-- **Lentes**: cambia el par de lentes. Arranca con el par de campo de visión más parecido (principal + gran angular). El lente más angular se recorta para igualar el encuadre del otro.
-- **Izq ⇄ Der**: si el 3D se ve raro (cansa la vista o lo cercano parece lejos), los ojos están invertidos. Tocalo.
+- **Lentes fijos**: siempre el lente 2 (principal) en el ojo izquierdo y el 5 (tele) en el derecho; no se pueden cambiar. El principal se recorta para igualar el encuadre del tele.
+- **Nivel**: sobre cada ojo hay una marca fija y una línea con el horizonte real (sensor de gravedad). Cuando el celular está derecho (±0,5°) se ponen verdes; amarillo hasta 2°, rojo más. Solo se ve en pantalla.
 - **Girar**: si la imagen sale rotada, tocalo hasta que quede derecha.
 - **Ajustes**: panel de calibración. Elegí qué ojo editar y mové su imagen (← → y ↓ ↑), rotala de a 0,1° o cambiá el zoom. **Separación** aleja o acerca las dos imágenes entre sí. **Líneas guía** muestra líneas para alinear (no salen en fotos ni videos). Los ajustes se guardan por par de lentes y se aplican a la vista en vivo, las fotos y los videos.
 - **Tocar la imagen** oculta los controles. Con el celular dentro de unos lentes VR tipo cardboard, ves el 3D en vivo.

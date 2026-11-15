@@ -111,6 +111,17 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
         }
     }
 
+    /** Rectángulos de cada ojo en una pantalla de w×h (el mismo encuadre que la vista en vivo). */
+    fun eyeRects(w: Int, h: Int): Pair<android.graphics.RectF, android.graphics.RectF> {
+        val portrait = quarterTurns % 2 == 0
+        val eyeAspect = if (portrait) bufH.toFloat() / bufW else bufW.toFloat() / bufH
+        var cw = w.toFloat(); var ch = h.toFloat(); var x0 = 0f; var y0 = 0f
+        val target = 2f * eyeAspect
+        if (w.toFloat() / h > target) { cw = h * target; x0 = (w - cw) / 2 } else { ch = w / target; y0 = (h - ch) / 2 }
+        val ew = cw / 2
+        return android.graphics.RectF(x0, y0, x0 + ew, y0 + ch) to android.graphics.RectF(x0 + ew, y0, x0 + cw, y0 + ch)
+    }
+
     fun setCrop(a: Float, b: Float) {
         cropA = a
         cropB = b

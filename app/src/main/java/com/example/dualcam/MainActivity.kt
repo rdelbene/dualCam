@@ -54,6 +54,11 @@ class MainActivity : Activity() {
     private lateinit var btnSettings: Button
     private lateinit var settings: View
     private lateinit var settingsBox: LinearLayout
+    private lateinit var level: LevelView
+
+    /** Lentes fijos: el 2 (principal) a la izquierda y el 5 (tele) a la derecha. No se pueden cambiar. */
+    private val LEFT_LENS = "2"
+    private val RIGHT_LENS = "5"
 
     // Calibración: se guarda por par de lentes.
     private val prefs by lazy { getSharedPreferences("calibracion", MODE_PRIVATE) }
@@ -110,6 +115,14 @@ class MainActivity : Activity() {
             runOnUiThread { maybeOpenCamera() }
         }
         renderer.quarterTurns = prefs.getInt("giro", 1)
+
+        // nivel sobre los dos ojos (encima de la imagen, debajo de los botones)
+        level = LevelView(this) { w, h -> renderer.eyeRects(w, h) }
+        (surfaceView.parent as android.widget.FrameLayout).addView(level, 1,
+            android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT))
+        // lentes fijos: sin cambiar par ni invertir ojos
+        btnPair.visibility = View.GONE
+        btnSwap.visibility = View.GONE
         buildSettings()
         btnSettings.setOnClickListener {
             settings.visibility = if (settings.visibility == View.VISIBLE) View.GONE else View.VISIBLE
@@ -278,7 +291,7 @@ class MainActivity : Activity() {
         renderer.adjA = adj("A")
         renderer.adjB = adj("B")
         renderer.separation = prefs.getFloat("${k}_sep", 0f)
-        renderer.swapEyes = prefs.getBoolean("${k}_swap", false)
+        renderer.swapEyes = false // el 2 siempre a la izquierda y el 5 a la derecha
         refreshRows()
     }
 
@@ -300,11 +313,13 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         hideSystemBars()
+        level.start()
         maybeOpenCamera()
     }
 
     override fun onPause() {
         if (recording) toggleRecording()
+        level.stop()
         closeCamera()
         super.onPause()
     }
@@ -341,16 +356,12 @@ class MainActivity : Activity() {
             }
         }
         logicalId = best
-        val all = mutableListOf<Pair<String, String>>()
-        for (i in bestPhys.indices) for (j in i + 1 until bestPhys.size) all.add(bestPhys[i] to bestPhys[j])
-        // Primero los pares con campos de visión más parecidos (menos recorte).
-        pairs = all.sortedByDescending { (a, b) ->
-            val ra = fovFactor(a)
-            val rb = fovFactor(b)
-            min(ra, rb) / max(ra, rb)
-        }
-        if (best == null || pairs.isEmpty()) {
+        // Siempre el mismo par: lente 2 (izquierda) y lente 5 (derecha).
+        pairs = if (LEFT_LENS in bestPhys && RIGHT_LENS in bestPhys) listOf(LEFT_LENS to RIGHT_LENS) else emptyList()
+        if (best == null) {
             info.text = "Este celular no expone una cámara trasera multi-lente para apps."
+        } else if (pairs.isEmpty()) {
+            info.text = "No encontré los lentes 2 y 5 (lentes disponibles: ${bestPhys.joinToString(", ")})."
         }
     }
 
