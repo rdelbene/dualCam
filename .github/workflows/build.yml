@@ -19,24 +19,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.9"
-      - name: Bajar el modelo de profundidad (MiDaS v2.1 small, licencia MIT)
+      - name: Bajar el modelo de profundidad (Depth Anything V2 small, versión TFLite de Qualcomm AI Hub, Apache 2.0)
         run: |
           mkdir -p app/src/main/assets
-          curl -fsSL -o app/src/main/assets/midas.tflite https://github.com/isl-org/MiDaS/releases/download/v2_1/model_opt.tflite
+          curl -fsSL -o app/src/main/assets/depth.tflite "https://huggingface.co/qualcomm/Depth-Anything-V2/resolve/3388c56142d6ea92507a2456155fada5a019edc7/Depth-Anything-V2.tflite"
           ls -la app/src/main/assets
-      - name: Probar el modelo nuevo (Depth Anything V2)
-        continue-on-error: true
-        run: |
-          pip install -q ai-edge-litert pillow numpy onnxruntime
-          for u in \
-            "https://huggingface.co/qualcomm/Depth-Anything-V2/resolve/3388c56142d6ea92507a2456155fada5a019edc7/Depth-Anything-V2.tflite" \
-            "https://huggingface.co/qualcomm/Depth-Anything-V2/resolve/main/Depth-Anything-V2_float.tflite" ; do
-            echo "PROBANDO $u"
-            if curl -fsSL -o /tmp/da2.tflite "$u"; then ls -la /tmp/da2.tflite; python3 .github/probe/probe.py /tmp/da2.tflite; break; fi
-          done
-          curl -fsSL "https://huggingface.co/api/models/qualcomm/Depth-Anything-V2" | python3 -c "import json,sys; print('ARCHIVOS', [s['rfilename'] for s in json.load(sys.stdin).get('siblings',[])])" || true
-          curl -fsSL "https://huggingface.co/api/models/onnx-community/depth-anything-v2-small" | python3 -c "import json,sys; print('ARCHIVOS ONNX', [s['rfilename'] for s in json.load(sys.stdin).get('siblings',[])])" || true
-          if curl -fsSL -o /tmp/da2.onnx "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx"; then ls -la /tmp/da2.onnx; python3 .github/probe/probe_onnx.py /tmp/da2.onnx; fi
       - run: gradle assembleDebug
       - run: cp app/build/outputs/apk/debug/app-debug.apk DualCam3D.apk
       - uses: actions/upload-artifact@v5

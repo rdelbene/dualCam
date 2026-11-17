@@ -13,6 +13,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        // solo celulares de 64 bits (como el Edge 50 Ultra): la app pesa menos
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     compileOptions {
@@ -29,6 +31,6 @@ android {
 }
 
 dependencies {
-    // IA en el celular para "Foto 3D" (profundidad con MiDaS)
+    // IA en el celular para "Foto 3D" (profundidad con Depth Anything V2)
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
 }

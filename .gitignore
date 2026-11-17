@@ -3,4 +3,4 @@ build/
 local.properties
 *.iml
 .idea/
-app/src/main/assets/midas.tflite
+app/src/main/assets/*.tflite
