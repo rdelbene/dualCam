@@ -140,7 +140,6 @@ class Photo3DActivity : Activity() {
             try {
                 val bmp = ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, u)) { dec, info, _ ->
                     dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                    if (android.os.Build.VERSION.SDK_INT >= 34) dec.isDecodeGainmap = false
                     val big = max(info.size.width, info.size.height)
                     if (big > 2400) { val k = 2400.0 / big; dec.setTargetSize((info.size.width * k).roundToInt(), (info.size.height * k).roundToInt()) }
                 }.let { if (it.config != Bitmap.Config.ARGB_8888) it.copy(Bitmap.Config.ARGB_8888, false) else it }
