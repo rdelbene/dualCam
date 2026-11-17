@@ -24,6 +24,13 @@ jobs:
           mkdir -p app/src/main/assets
           curl -fsSL -o app/src/main/assets/midas.tflite https://github.com/isl-org/MiDaS/releases/download/v2_1/model_opt.tflite
           ls -la app/src/main/assets
+      - name: Probar el modelo nuevo (Depth Anything V2)
+        continue-on-error: true
+        run: |
+          curl -fsSL -o /tmp/da2.tflite https://huggingface.co/qualcomm/Depth-Anything-V2/resolve/main/Depth-Anything-V2.tflite
+          ls -la /tmp/da2.tflite
+          pip install -q ai-edge-litert pillow numpy
+          python3 .github/probe/probe.py /tmp/da2.tflite
       - run: gradle assembleDebug
       - run: cp app/build/outputs/apk/debug/app-debug.apk DualCam3D.apk
       - uses: actions/upload-artifact@v5
