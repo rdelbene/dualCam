@@ -22,4 +22,13 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    // el modelo de profundidad se lee directo del APK (sin comprimir)
+    androidResources {
+        noCompress += "tflite"
+    }
+}
+
+dependencies {
+    // IA en el celular para "Foto 3D" (profundidad con MiDaS)
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 }

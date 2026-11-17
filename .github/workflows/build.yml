@@ -19,6 +19,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.9"
+      - name: Bajar el modelo de profundidad (MiDaS v2.1 small, licencia MIT)
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fsSL -o app/src/main/assets/midas.tflite https://github.com/isl-org/MiDaS/releases/download/v2_1/model_opt.tflite
+          ls -la app/src/main/assets
       - run: gradle assembleDebug
       - run: cp app/build/outputs/apk/debug/app-debug.apk DualCam3D.apk
       - uses: actions/upload-artifact@v5

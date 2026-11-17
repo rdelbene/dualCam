@@ -136,6 +136,11 @@ class MainActivity : Activity() {
             }
         }
         panel.addView(btnLevel, panel.indexOfChild(btnRotate) + 1)
+        // Foto 3D desde una sola foto (IA de profundidad)
+        panel.addView(Button(this).apply {
+            isAllCaps = false; text = "Foto 3D desde una foto"
+            setOnClickListener { if (!recording) startActivity(android.content.Intent(this@MainActivity, Photo3DActivity::class.java)) }
+        }, panel.indexOfChild(btnLevel) + 1)
         btnLevelRef = btnLevel
         (surfaceView.parent as android.widget.FrameLayout).addView(level, 1,
             android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT))

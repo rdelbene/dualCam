@@ -36,3 +36,6 @@ Abrí la foto o el video con un reproductor VR que acepte formato **SBS (lado a 
 - Los dos lentes son distintos (resolución, nitidez, color). El ojo del gran angular recortado tiene menos detalle.
 - Si los lentes no están perfectamente alineados, puede haber un pequeño desfase vertical.
 - Resolución: hasta 1920×1440 por ojo en foto y 1440×1080 por ojo en video, según lo que acepte el equipo.
+
+## Foto 3D desde una foto
+Botón **Foto 3D desde una foto** (o Compartir → Foto 3D desde la galería): elegís cualquier foto, la IA (MiDaS v2.1 small, corre en el celular, sin internet) estima qué está cerca y qué lejos, y arma las dos vistas lado a lado para los lentes de VR. La barra **Profundidad** (1 a 6) ajusta cuánto se separan. **Guardar** deja la copia en Imágenes/DualCam3D como `3D_<nombre>_SBS.jpg`; el original no se toca. Es 3D estimado: funciona mejor con un sujeto claro adelante; en pelo, ramas o vidrios puede haber bordes estirados.
