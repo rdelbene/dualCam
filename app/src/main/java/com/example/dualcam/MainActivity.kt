@@ -135,13 +135,8 @@ class MainActivity : Activity() {
                 show(); level.invalidate()
             }
         }
-        panel.addView(btnLevel, panel.indexOfChild(btnRotate) + 1)
-        // Foto 3D desde una sola foto (IA de profundidad)
-        panel.addView(Button(this).apply {
-            isAllCaps = false; text = "Foto 3D desde una foto"
-            setOnClickListener { if (!recording) startActivity(android.content.Intent(this@MainActivity, Photo3DActivity::class.java)) }
-        }, panel.indexOfChild(btnLevel) + 1)
         btnLevelRef = btnLevel
+        buildControls()
         (surfaceView.parent as android.widget.FrameLayout).addView(level, 1,
             android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT))
         // lentes fijos: sin cambiar par ni invertir ojos
@@ -168,6 +163,7 @@ class MainActivity : Activity() {
             val v = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             panel.visibility = v
             info.visibility = v
+            menuBtn.visibility = v
         }
 
         btnPhoto.setOnClickListener { takePhoto() }
@@ -190,6 +186,61 @@ class MainActivity : Activity() {
                 prefs.edit().putInt("giro", renderer.quarterTurns).apply()
             }
         }
+    }
+
+    // ---------- Controles: disparador, grabar y menú ⋮ ----------
+
+    private lateinit var menuBtn: TextView
+
+    private fun round(fill: Int, stroke: Int) = android.graphics.drawable.GradientDrawable().apply {
+        shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(fill); setStroke(dp(3), stroke)
+    }
+
+    /** Pantalla limpia: a la derecha solo el disparador (foto 3D) y grabar; todo lo demás va en el menú ⋮ de arriba. */
+    private fun buildControls() {
+        for (b in listOf(btnPair, btnSwap, btnRotate, btnSettings)) b.visibility = View.GONE
+        btnPhoto.apply {
+            text = "3D"; textSize = 16f; isAllCaps = false; setTextColor(android.graphics.Color.BLACK)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            background = round(android.graphics.Color.WHITE, 0x66FFFFFF)
+            stateListAnimator = null
+            layoutParams = LinearLayout.LayoutParams(dp(72), dp(72)).apply { bottomMargin = dp(18) }
+        }
+        btnRecord.apply {
+            textSize = 20f; isAllCaps = false; setTextColor(android.graphics.Color.WHITE)
+            background = round(0xFFD32F2F.toInt(), 0x66FFFFFF)
+            stateListAnimator = null
+            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
+        }
+        updateRecordButton()
+        menuBtn = TextView(this).apply {
+            text = "⋮"; textSize = 26f; setTextColor(android.graphics.Color.WHITE); gravity = android.view.Gravity.CENTER
+            background = round(0x66000000, 0x00000000)
+            setOnClickListener { showMenu(this) }
+        }
+        (surfaceView.parent as android.widget.FrameLayout).addView(menuBtn,
+            android.widget.FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.TOP or android.view.Gravity.END).apply { setMargins(0, dp(10), dp(26), 0) })
+    }
+
+    private fun updateRecordButton() { btnRecord.text = if (recording) "■" else "●" }
+
+    private fun showMenu(anchor: View) {
+        if (recording) { toast("Detené la grabación para usar el menú"); return }
+        val pm = android.widget.PopupMenu(this, anchor)
+        pm.menu.add(0, 1, 0, "Foto 3D desde la galería (IA)")
+        pm.menu.add(0, 2, 1, "Enderezar automático").apply { isCheckable = true; isChecked = level.auto }
+        pm.menu.add(0, 3, 2, "Girar la imagen")
+        pm.menu.add(0, 4, 3, if (settings.visibility == View.VISIBLE) "Cerrar calibración" else "Calibración")
+        pm.setOnMenuItemClickListener {
+            when (it.itemId) {
+                1 -> startActivity(android.content.Intent(this, Photo3DActivity::class.java))
+                2 -> btnLevelRef?.performClick()
+                3 -> btnRotate.performClick()
+                4 -> btnSettings.performClick()
+            }
+            true
+        }
+        pm.show()
     }
 
     // ---------- Panel de ajustes / calibración ----------
@@ -624,7 +675,7 @@ class MainActivity : Activity() {
 
     private fun setRecordingUi(on: Boolean) {
         recording = on
-        btnRecord.text = if (on) "■ Detener" else "● Grabar"
+        updateRecordButton()
         btnPair.isEnabled = !on
         btnRotate.isEnabled = !on
         btnLevelRef?.isEnabled = !on
