@@ -191,7 +191,7 @@ class Photo3DActivity : Activity() {
                 batching = false; saveBtn.text = "Guardar"
                 window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 status.text = (if (stopped) "Detenido: " else "Listo: ") + "$ok foto" + (if (ok == 1) "" else "s") + " 3D guardada" + (if (ok == 1) "" else "s") +
-                    " en Imágenes/DualCam3D (_VR para los lentes, _SBS lado a lado)" + (if (fail > 0) ". $fail no se pudieron procesar." else ".") +
+                    " en Imágenes/DualCam3D" + (if (fail > 0) ". $fail no se pudieron procesar." else ".") +
                     " Se ve la última; con la barra podés cambiarle la profundidad y volver a guardarla."
             }
         }
@@ -250,7 +250,7 @@ class Photo3DActivity : Activity() {
         io.execute {
             try {
                 saveFiles(name, l, r)
-                main.post { status.text = "Guardadas en Imágenes/DualCam3D: 3D_${name}_VR.jpg (para ver con los lentes en este celular) y _SBS.jpg (lado a lado común)." }
+                main.post { status.text = "Guardada en Imágenes/DualCam3D: 3D_${name}.jpg" }
             } catch (e: Exception) {
                 main.post { status.text = "No pude guardar: ${e.message}" }
             }

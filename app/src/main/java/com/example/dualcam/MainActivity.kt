@@ -635,8 +635,10 @@ class MainActivity : Activity() {
     // ---------- Foto ----------
 
     private fun takePhoto() {
-        if (session == null) return
-        renderer.capture { bmp -> saveBitmap(bmp) }
+        if (session == null || !btnPhoto.isEnabled) return
+        // un toque = una foto: el botón queda bloqueado hasta que se guarda (evita dobles toques)
+        btnPhoto.isEnabled = false
+        renderer.capture { bmp -> saveBitmap(bmp); runOnUiThread { if (!recording) btnPhoto.isEnabled = true } }
     }
 
     private fun saveBitmap(bmp: Bitmap) {

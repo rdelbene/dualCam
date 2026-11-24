@@ -214,12 +214,9 @@ class Depth3D private constructor(ctx: Context) {
 
     /** Guarda las dos versiones: _VR (para los lentes en este celular) y _SBS (lado a lado común). */
     fun saveFiles(name: String, l: Bitmap, r: Bitmap) {
-        val w = l.width; val h = l.height
-        val sbs = Bitmap.createBitmap(w * 2, h, Bitmap.Config.ARGB_8888)
-        android.graphics.Canvas(sbs).apply { drawBitmap(l, 0f, 0f, null); drawBitmap(r, w.toFloat(), 0f, null) }
-        writeJpeg("3D_${name}_SBS.jpg", sbs); sbs.recycle()
+        // una sola foto: preparada para el visor (cada ojo centrado bajo su lente)
         val vr = vrFrame(l, r)
-        writeJpeg("3D_${name}_VR.jpg", vr); vr.recycle()
+        writeJpeg("3D_${name}.jpg", vr); vr.recycle()
     }
 
 }
