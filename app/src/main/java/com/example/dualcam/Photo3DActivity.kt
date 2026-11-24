@@ -54,14 +54,23 @@ class Photo3DActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var controls: LinearLayout
     private lateinit var strengthLabel: TextView
+    private lateinit var saveBtn: TextView
+    @Volatile private var batching = false
+    @Volatile private var stopBatch = false
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildUi()
-        val shared = if (intent?.action == Intent.ACTION_SEND) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java) else null
-        if (shared != null) load(shared) else pick()
+        when (intent?.action) {
+            Intent.ACTION_SEND -> intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)?.let { load(it) } ?: pick()
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val list = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+                when { list.isEmpty() -> pick(); list.size == 1 -> load(list[0]); else -> processMany(list) }
+            }
+            else -> pick()
+        }
     }
 
     override fun onDestroy() { io.shutdownNow(); super.onDestroy() }
@@ -86,7 +95,7 @@ class Photo3DActivity : Activity() {
             setPadding(dp(10), dp(6), dp(10), dp(6)); setBackgroundColor(Color.argb(170, 0, 0, 0))
         }
         controls.addView(pill("✕", Color.argb(255, 50, 50, 50), Color.WHITE) { finish() })
-        controls.addView(pill("Otra foto", Color.argb(255, 50, 50, 50), Color.WHITE) { pick() },
+        controls.addView(pill("Otras fotos", Color.argb(255, 50, 50, 50), Color.WHITE) { if (!batching) pick() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
         strengthLabel = TextView(this).apply { textSize = 13f; setTextColor(Color.WHITE); setPadding(dp(14), 0, dp(4), 0) }
         controls.addView(strengthLabel)
@@ -99,7 +108,8 @@ class Photo3DActivity : Activity() {
             })
         }
         controls.addView(bar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        controls.addView(pill("Guardar", Color.rgb(0, 200, 130), Color.BLACK) { save() })
+        saveBtn = pill("Guardar", Color.rgb(0, 200, 130), Color.BLACK) { if (batching) stopBatch = true else save() }
+        controls.addView(saveBtn)
         status = TextView(this).apply { textSize = 13f; setTextColor(Color.WHITE); setPadding(dp(12), 0, 0, 0) }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         wrap.addView(controls)
@@ -113,36 +123,87 @@ class Photo3DActivity : Activity() {
 
     private fun pick() {
         @Suppress("DEPRECATION")
-        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "image/*" }, REQ_PICK)
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "image/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true) // se pueden elegir varias (toque largo en el selector)
+        }, REQ_PICK)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_PICK) {
-            val u = data?.data
-            if (resultCode == RESULT_OK && u != null) load(u) else if (photo == null) finish()
+            val list = mutableListOf<Uri>()
+            data?.clipData?.let { c -> for (i in 0 until c.itemCount) list += c.getItemAt(i).uri }
+            if (list.isEmpty()) data?.data?.let { list += it }
+            when {
+                resultCode != RESULT_OK || list.isEmpty() -> if (photo == null && !batching) finish()
+                list.size == 1 -> load(list[0])
+                else -> processMany(list)
+            }
         }
     }
 
     // ------------------------------------------------------------------ cargar y estimar profundidad
 
+    private fun nameOf(u: Uri): String = try {
+        contentResolver.query(u, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0)?.substringBeforeLast('.') else null
+        }
+    } catch (_: Exception) { null } ?: "foto"
+
+    private fun decodeSized(u: Uri): Bitmap =
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, u)) { dec, info, _ ->
+            dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val big = max(info.size.width, info.size.height)
+            if (big > 2400) { val k = 2400.0 / big; dec.setTargetSize((info.size.width * k).roundToInt(), (info.size.height * k).roundToInt()) }
+        }.let { if (it.config != Bitmap.Config.ARGB_8888) it.copy(Bitmap.Config.ARGB_8888, false) else it }
+
+    /** Varias fotos: una por una, cada una se convierte a 3D y se guarda sola. Se ve cada resultado mientras avanza. */
+    private fun processMany(list: List<Uri>) {
+        val my = ++gen
+        batching = true; stopBatch = false
+        saveBtn.text = "Detener"
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val st = strength
+        io.execute {
+            var ok = 0; var fail = 0
+            for ((k, u) in list.withIndex()) {
+                if (stopBatch || my != gen) break
+                val name = nameOf(u)
+                main.post { status.text = "Foto ${k + 1} de ${list.size}: $name · calculando la profundidad…" }
+                try {
+                    val bmp = decodeSized(u)
+                    val d = estimateDepth(bmp)
+                    val eyes = buildEyes(bmp, d, st) { stopBatch } ?: break
+                    saveFiles(name, eyes.first, eyes.second)
+                    ok++
+                    main.post {
+                        photo = bmp; depth = d; srcName = name
+                        eyeL = eyes.first; eyeR = eyes.second; result = null
+                        img.set(eyes.first, eyes.second)
+                    }
+                } catch (e: Throwable) { fail++ }
+            }
+            val stopped = stopBatch
+            main.post {
+                batching = false; saveBtn.text = "Guardar"
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                status.text = (if (stopped) "Detenido: " else "Listo: ") + "$ok foto" + (if (ok == 1) "" else "s") + " 3D guardada" + (if (ok == 1) "" else "s") +
+                    " en Imágenes/DualCam3D (_VR para los lentes, _SBS lado a lado)" + (if (fail > 0) ". $fail no se pudieron procesar." else ".") +
+                    " Se ve la última; con la barra podés cambiarle la profundidad y volver a guardarla."
+            }
+        }
+    }
+
     private fun load(u: Uri) {
         val my = ++gen
         status.text = "Leyendo la foto…"
         img.set(null, null); result = null; eyeL = null; eyeR = null
-        srcName = try {
-            contentResolver.query(u, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) c.getString(0)?.substringBeforeLast('.') else null
-            }
-        } catch (_: Exception) { null } ?: "foto"
         io.execute {
             try {
-                val bmp = ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, u)) { dec, info, _ ->
-                    dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                    val big = max(info.size.width, info.size.height)
-                    if (big > 2400) { val k = 2400.0 / big; dec.setTargetSize((info.size.width * k).roundToInt(), (info.size.height * k).roundToInt()) }
-                }.let { if (it.config != Bitmap.Config.ARGB_8888) it.copy(Bitmap.Config.ARGB_8888, false) else it }
+                srcName = nameOf(u)
+                val bmp = decodeSized(u)
                 if (my != gen) return@execute
                 main.post { status.text = "Calculando la profundidad con IA…" }
                 val d = estimateDepth(bmp)
@@ -233,6 +294,29 @@ class Photo3DActivity : Activity() {
     // ------------------------------------------------------------------ armar las dos vistas
 
     /** Corre cada pixel según su profundidad: lo cercano se mueve más. Los huecos se rellenan con el fondo. */
+    /** Arma las dos vistas (ojo izquierdo y derecho). Devuelve null si se canceló. */
+    private fun buildEyes(bmp: Bitmap, d: FloatArray, st: Int, cancelled: () -> Boolean): Pair<Bitmap, Bitmap>? {
+        val w = bmp.width; val h = bmp.height
+        val src = IntArray(w * h); bmp.getPixels(src, 0, w, 0, 0, w, h)
+        val maxDisp = w * st / 100f
+        // punto sin separación: la profundidad mediana (lo de adelante sale, lo de atrás se mete)
+        val conv = d.copyOf().also { it.sort() }[d.size / 2]
+        val left = IntArray(w * h); val right = IntArray(w * h)
+        val holeL = BooleanArray(w * h); val holeR = BooleanArray(w * h)
+        val rowL = IntArray(w); val rowR = IntArray(w)
+        val zL = FloatArray(w); val zR = FloatArray(w)
+        for (y in 0 until h) {
+            warpRow(src, d, y, w, +0.5f * maxDisp, conv, rowL, zL, holeL)
+            warpRow(src, d, y, w, -0.5f * maxDisp, conv, rowR, zR, holeR)
+            System.arraycopy(rowL, 0, left, y * w, w)
+            System.arraycopy(rowR, 0, right, y * w, w)
+            if (cancelled()) return null
+        }
+        smoothHoles(left, holeL, w, h); smoothHoles(right, holeR, w, h)
+        return Bitmap.createBitmap(left, w, h, Bitmap.Config.ARGB_8888) to Bitmap.createBitmap(right, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    /** Corre cada pixel según su profundidad: lo cercano se mueve más. Los huecos se rellenan con el fondo. */
     private fun stereo() {
         val bmp = photo ?: return
         val d = depth ?: return
@@ -240,32 +324,11 @@ class Photo3DActivity : Activity() {
         val st = strength
         status.text = "Armando la vista 3D…"
         io.execute {
-            val w = bmp.width; val h = bmp.height
-            val src = IntArray(w * h); bmp.getPixels(src, 0, w, 0, 0, w, h)
-            val maxDisp = w * st / 100f
-            // punto sin separación: la profundidad mediana (lo de adelante sale, lo de atrás se mete)
-            val conv = d.copyOf().also { it.sort() }[d.size / 2]
-            val left = IntArray(w * h); val right = IntArray(w * h)
-            val holeL = BooleanArray(w * h); val holeR = BooleanArray(w * h)
-            val rowL = IntArray(w); val rowR = IntArray(w)
-            val zL = FloatArray(w); val zR = FloatArray(w)
-            for (y in 0 until h) {
-                warpRow(src, d, y, w, +0.5f * maxDisp, conv, rowL, zL, holeL)
-                warpRow(src, d, y, w, -0.5f * maxDisp, conv, rowR, zR, holeR)
-                System.arraycopy(rowL, 0, left, y * w, w)
-                System.arraycopy(rowR, 0, right, y * w, w)
-                if (my != gen) return@execute
-            }
-            smoothHoles(left, holeL, w, h); smoothHoles(right, holeR, w, h)
-            val out = Bitmap.createBitmap(w * 2, h, Bitmap.Config.ARGB_8888)
-            out.setPixels(left, 0, w, 0, 0, w, h)
-            out.setPixels(right, 0, w, w, 0, w, h)
-            val bl = Bitmap.createBitmap(left, w, h, Bitmap.Config.ARGB_8888)
-            val br = Bitmap.createBitmap(right, w, h, Bitmap.Config.ARGB_8888)
+            val eyes = buildEyes(bmp, d, st) { my != gen } ?: return@execute
             main.post {
-                if (my != gen) { out.recycle(); return@post }
-                result = out; eyeL = bl; eyeR = br
-                img.set(bl, br)
+                if (my != gen) return@post
+                eyeL = eyes.first; eyeR = eyes.second; result = null
+                img.set(eyes.first, eyes.second)
                 status.text = "Listo. Tocá la imagen para esconder los controles y mirala con los lentes."
             }
         }
@@ -329,8 +392,7 @@ class Photo3DActivity : Activity() {
     }
 
     /** Imagen del tamaño de la pantalla (apaisada) con cada ojo centrado en su mitad, como la muestra la app. */
-    private fun vrFrame(): Bitmap? {
-        val l = eyeL ?: return null; val r = eyeR ?: return null
+    private fun vrFrame(l: Bitmap, r: Bitmap): Bitmap {
         val dm = resources.displayMetrics
         val sw = max(dm.widthPixels, dm.heightPixels); val sh = min(dm.widthPixels, dm.heightPixels)
         // a resolución de la foto: el alto de la imagen manda
@@ -342,34 +404,35 @@ class Photo3DActivity : Activity() {
         return out
     }
 
-    // ------------------------------------------------------------------ guardar
+    private fun writeJpeg(name: String, bmp: Bitmap) {
+        val v = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/DualCam3D")
+        }
+        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: throw IllegalStateException("no se pudo crear el archivo")
+        contentResolver.openOutputStream(uri)?.use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+    }
+
+    /** Guarda las dos versiones: _VR (para los lentes en este celular) y _SBS (lado a lado común). */
+    private fun saveFiles(name: String, l: Bitmap, r: Bitmap) {
+        val w = l.width; val h = l.height
+        val sbs = Bitmap.createBitmap(w * 2, h, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(sbs).apply { drawBitmap(l, 0f, 0f, null); drawBitmap(r, w.toFloat(), 0f, null) }
+        writeJpeg("3D_${name}_SBS.jpg", sbs); sbs.recycle()
+        val vr = vrFrame(l, r)
+        writeJpeg("3D_${name}_VR.jpg", vr); vr.recycle()
+    }
 
     private fun save() {
-        val out = result ?: run { status.text = "Todavía no hay foto 3D."; return }
+        val l = eyeL; val r = eyeR
+        if (l == null || r == null) { status.text = "Todavía no hay foto 3D."; return }
+        val name = srcName
         status.text = "Guardando…"
         io.execute {
             try {
-                val v = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "3D_${srcName}_SBS.jpg")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/DualCam3D")
-                }
-                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v) ?: throw IllegalStateException("no se pudo crear el archivo")
-                contentResolver.openOutputStream(uri)?.use { out.compress(Bitmap.CompressFormat.JPEG, 95, it) }
-                // versión para el visor: del tamaño de esta pantalla, cada ojo centrado en su mitad
-                val vr = vrFrame()
-                if (vr != null) {
-                    val v2 = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "3D_${srcName}_VR.jpg")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/DualCam3D")
-                    }
-                    contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v2)?.let { u2 ->
-                        contentResolver.openOutputStream(u2)?.use { vr.compress(Bitmap.CompressFormat.JPEG, 95, it) }
-                    }
-                    vr.recycle()
-                }
-                main.post { status.text = "Guardadas en Imágenes/DualCam3D: 3D_${srcName}_VR.jpg (para ver con los lentes en este celular) y _SBS.jpg (lado a lado común)." }
+                saveFiles(name, l, r)
+                main.post { status.text = "Guardadas en Imágenes/DualCam3D: 3D_${name}_VR.jpg (para ver con los lentes en este celular) y _SBS.jpg (lado a lado común)." }
             } catch (e: Exception) {
                 main.post { status.text = "No pude guardar: ${e.message}" }
             }
