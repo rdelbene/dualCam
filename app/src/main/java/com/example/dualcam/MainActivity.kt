@@ -162,7 +162,6 @@ class MainActivity : Activity() {
         surfaceView.setOnClickListener {
             val v = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             panel.visibility = v
-            info.visibility = v
             menuBtn.visibility = v
         }
 
@@ -191,6 +190,53 @@ class MainActivity : Activity() {
     // ---------- Controles: disparador, grabar y menú ⋮ ----------
 
     private lateinit var menuBtn: TextView
+    private lateinit var btnAi: Button
+    private lateinit var timer: TextView
+    private var recStart = 0L
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!recording) return
+            val sec = (android.os.SystemClock.elapsedRealtime() - recStart) / 1000
+            timer.text = "● %02d:%02d".format(sec / 60, sec % 60)
+            timer.postDelayed(this, 500)
+        }
+    }
+    @Volatile private var aiBusy = 0
+
+    /** Foto 2D con el lente principal (encuadre completo) que la IA convierte a 3D al momento. Se guardan la 2D y la 3D. */
+    private fun takeAiPhoto() {
+        if (session == null || recording) return
+        if (aiBusy >= 2) { toast("Esperá un momento: todavía estoy convirtiendo las anteriores"); return }
+        aiBusy++
+        btnAi.text = "…"
+        renderer.captureMain { bmp ->
+            val name = "DualCam_${stamp()}"
+            try {
+                // la foto 2D también queda guardada
+                val v = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "${name}_2D.jpg")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/DualCam3D")
+                }
+                contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v)?.let { u ->
+                    contentResolver.openOutputStream(u)?.use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                }
+                val d3 = Depth3D.get(this)
+                val d = d3.estimateDepth(bmp)
+                val eyes = d3.buildEyes(bmp, d, Depth3D.strength(this)) { false }
+                if (eyes != null) {
+                    d3.saveFiles(name, eyes.first, eyes.second)
+                    eyes.first.recycle(); eyes.second.recycle()
+                    toast("Foto 3D (IA) guardada: Pictures/DualCam3D/3D_${name}_VR.jpg")
+                }
+            } catch (e: Throwable) {
+                toast("No se pudo convertir a 3D: ${e.message}")
+            } finally {
+                bmp.recycle()
+                runOnUiThread { aiBusy--; if (aiBusy == 0) btnAi.text = "IA" }
+            }
+        }
+    }
 
     private fun round(fill: Int, stroke: Int) = android.graphics.drawable.GradientDrawable().apply {
         shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(fill); setStroke(dp(3), stroke)
@@ -213,6 +259,24 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
         }
         updateRecordButton()
+        // botón IA: foto 2D del principal que se convierte a 3D en el momento
+        btnAi = Button(this).apply {
+            text = "IA"; textSize = 15f; isAllCaps = false; setTextColor(android.graphics.Color.WHITE)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            background = round(0xFF5E35B1.toInt(), 0x66FFFFFF)
+            stateListAnimator = null
+            setOnClickListener { takeAiPhoto() }
+        }
+        panel.addView(btnAi, panel.indexOfChild(btnPhoto) + 1, LinearLayout.LayoutParams(dp(56), dp(56)).apply { bottomMargin = dp(18) })
+        timer = TextView(this).apply {
+            textSize = 16f; setTextColor(android.graphics.Color.WHITE); visibility = View.GONE
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(0xAAD32F2F.toInt()) }
+        }
+        (surfaceView.parent as android.widget.FrameLayout).addView(timer,
+            android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(12) })
         menuBtn = TextView(this).apply {
             text = "⋮"; textSize = 26f; setTextColor(android.graphics.Color.WHITE); gravity = android.view.Gravity.CENTER
             background = round(0x66000000, 0x00000000)
@@ -222,7 +286,15 @@ class MainActivity : Activity() {
             android.widget.FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.TOP or android.view.Gravity.END).apply { setMargins(0, dp(10), dp(26), 0) })
     }
 
-    private fun updateRecordButton() { btnRecord.text = if (recording) "■" else "●" }
+    private fun updateRecordButton() {
+        btnRecord.text = if (recording) "■" else "●"
+        if (!::timer.isInitialized) return
+        if (recording) {
+            recStart = android.os.SystemClock.elapsedRealtime()
+            timer.text = "● 00:00"; timer.visibility = View.VISIBLE
+            timer.removeCallbacks(tick); timer.post(tick)
+        } else { timer.removeCallbacks(tick); timer.visibility = View.GONE }
+    }
 
     private fun showMenu(anchor: View) {
         if (recording) { toast("Detené la grabación para usar el menú"); return }
@@ -231,12 +303,19 @@ class MainActivity : Activity() {
         pm.menu.add(0, 2, 1, "Enderezar automático").apply { isCheckable = true; isChecked = level.auto }
         pm.menu.add(0, 3, 2, "Girar la imagen")
         pm.menu.add(0, 4, 3, if (settings.visibility == View.VISIBLE) "Cerrar calibración" else "Calibración")
+        pm.menu.add(0, 5, 4, "Profundidad del botón IA: ${Depth3D.strength(this)}")
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startActivity(android.content.Intent(this, Photo3DActivity::class.java))
                 2 -> btnLevelRef?.performClick()
                 3 -> btnRotate.performClick()
                 4 -> btnSettings.performClick()
+                5 -> {
+                    val opts = arrayOf("1 (suave)", "2", "3 (normal)", "4", "5", "6 (fuerte)")
+                    android.app.AlertDialog.Builder(this).setTitle("Profundidad de las fotos IA")
+                        .setSingleChoiceItems(opts, Depth3D.strength(this) - 1) { dlg, i -> Depth3D.setStrength(this, i + 1); dlg.dismiss() }
+                        .show()
+                }
             }
             true
         }
@@ -601,10 +680,8 @@ class MainActivity : Activity() {
         val left = if (renderer.swapEyes) labelB else labelA
         val right = if (renderer.swapEyes) labelA else labelB
         val s = streamSize
-        runOnUiThread {
-            info.text = "Ojo izq: $left · Ojo der: $right · ${s.width}x${s.height} por lente" +
-                    "\nTocá la imagen para ocultar los controles"
-        }
+        // pantalla limpia: el texto solo aparece si hay un problema con los lentes
+        runOnUiThread { info.visibility = View.GONE }
     }
 
     // ---------- Foto ----------
@@ -680,6 +757,7 @@ class MainActivity : Activity() {
         btnRotate.isEnabled = !on
         btnLevelRef?.isEnabled = !on
         btnPhoto.isEnabled = !on
+        if (::btnAi.isInitialized) btnAi.isEnabled = !on
         if (on) settings.visibility = View.GONE
         btnSettings.isEnabled = !on
     }
