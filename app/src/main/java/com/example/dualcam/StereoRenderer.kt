@@ -228,40 +228,6 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
         }
     }
 
-    /** Para el botón IA: una foto 2D del lente principal completo (sin el recorte que iguala al tele ni la calibración). */
-    @Volatile private var fullFrame = false
-
-    fun captureMain(cb: (Bitmap) -> Unit) {
-        handler.post {
-            egl.makeCurrent(pbuffer)
-            val portrait = quarterTurns % 2 == 0
-            val w = if (portrait) bufH else bufW
-            val h = if (portrait) bufW else bufH
-            val t = IntArray(1); val fbo = IntArray(1)
-            GLES20.glGenTextures(1, t, 0)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, t[0])
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
-            GLES20.glGenFramebuffers(1, fbo, 0)
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, t[0], 0)
-            GLES20.glClearColor(0f, 0f, 0f, 1f); GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            fullFrame = true
-            try { drawEye(0, 0, w, h, 0, side = 0) } finally { fullFrame = false }
-            val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
-            GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            GLES20.glDeleteFramebuffers(1, fbo, 0)
-            GLES20.glDeleteTextures(1, t, 0)
-            Thread {
-                val raw = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                buf.rewind(); raw.copyPixelsFromBuffer(buf)
-                val flipped = Bitmap.createBitmap(raw, 0, 0, w, h, Matrix().apply { preScale(1f, -1f) }, false)
-                raw.recycle()
-                cb(flipped)
-            }.start()
-        }
-    }
-
     fun release() {
         handler.post {
             encoder?.let {
@@ -360,11 +326,10 @@ class StereoRenderer(onReady: (SurfaceTexture, SurfaceTexture) -> Unit) {
 
     private fun drawEye(x: Int, y: Int, w: Int, h: Int, cam: Int, side: Int) {
         GLES20.glViewport(x, y, w, h)
-        val full = fullFrame
-        val crop = if (full) 1f else if (cam == 0) cropA else cropB
+        val crop = if (cam == 0) cropA else cropB
         val mtx = if (cam == 0) mtxA else mtxB
-        val adj = if (full) EyeAdjust() else if (cam == 0) adjA else adjB
-        val shift = if (full) 0f else if (side == 0) -separation / 2f else separation / 2f
+        val adj = if (cam == 0) adjA else adjB
+        val shift = if (side == 0) -separation / 2f else separation / 2f
         val aspect = w.toFloat() / h
         val lv = levelDeg
         val th = Math.toRadians(-(adj.rotDeg + lv).toDouble())
