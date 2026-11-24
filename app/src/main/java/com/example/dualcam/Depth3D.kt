@@ -109,84 +109,72 @@ class Depth3D private constructor(ctx: Context) {
     }
 
 
-    /** Arma las dos vistas (ojo izquierdo y derecho). Devuelve null si se canceló. */
-    fun buildEyes(bmp: Bitmap, d: FloatArray, st: Int, cancelled: () -> Boolean): Pair<Bitmap, Bitmap>? {
+    /**
+     * Arma las dos vistas (ojo izquierdo y derecho). Devuelve null si se canceló.
+     *
+     * Cada pixel de cada ojo va a buscar su color a la foto original (muestreo inverso), corrido según la profundidad.
+     * Así no quedan huecos ni copias: en los bordes (pelo, ramas) la imagen se estira apenas en vez de partirse en
+     * dos capas. La profundidad se suaviza un poco para que el borde del sujeto se mueva todo junto.
+     */
+    fun buildEyes(bmp: Bitmap, d0: FloatArray, st: Int, cancelled: () -> Boolean): Pair<Bitmap, Bitmap>? {
         val w = bmp.width; val h = bmp.height
         val src = IntArray(w * h); bmp.getPixels(src, 0, w, 0, 0, w, h)
         val maxDisp = w * st / 100f
+        // suavizado de la profundidad (dos pasadas de caja ≈ gaussiana), radio ~ la mitad del corrimiento máximo
+        val rad = max(2, (maxDisp * 0.5f).roundToInt())
+        val d = blur(blur(d0, w, h, rad), w, h, rad)
+        if (cancelled()) return null
         // punto sin separación: la profundidad mediana (lo de adelante sale, lo de atrás se mete)
         val conv = d.copyOf().also { it.sort() }[d.size / 2]
         val left = IntArray(w * h); val right = IntArray(w * h)
-        val holeL = BooleanArray(w * h); val holeR = BooleanArray(w * h)
-        val rowL = IntArray(w); val rowR = IntArray(w)
-        val zL = FloatArray(w); val zR = FloatArray(w)
         for (y in 0 until h) {
-            warpRow(src, d, y, w, +0.5f * maxDisp, conv, rowL, zL, holeL)
-            warpRow(src, d, y, w, -0.5f * maxDisp, conv, rowR, zR, holeR)
-            System.arraycopy(rowL, 0, left, y * w, w)
-            System.arraycopy(rowR, 0, right, y * w, w)
+            sampleRow(src, d, y, w, +0.5f * maxDisp, conv, left)
+            sampleRow(src, d, y, w, -0.5f * maxDisp, conv, right)
             if (cancelled()) return null
         }
-        smoothHoles(left, holeL, w, h); smoothHoles(right, holeR, w, h)
         return Bitmap.createBitmap(left, w, h, Bitmap.Config.ARGB_8888) to Bitmap.createBitmap(right, w, h, Bitmap.Config.ARGB_8888)
     }
 
-
-    fun warpRow(src: IntArray, d: FloatArray, y: Int, w: Int, k: Float, conv: Float, row: IntArray, z: FloatArray, hole: BooleanArray) {
-        java.util.Arrays.fill(z, -1f)
+    /** Fila de un ojo: el pixel x toma el color de la foto en xs, con xs = x − k·(profundidad(xs) − conv). */
+    private fun sampleRow(src: IntArray, d: FloatArray, y: Int, w: Int, k: Float, conv: Float, out: IntArray) {
         val base = y * w
-        var prevT = Float.NaN
+        val last = (w - 1).toFloat()
         for (x in 0 until w) {
-            val dz = d[base + x]
-            val t = x + k * (dz - conv)
-            // rango que cubre este pixel (tapa grietas chicas al estirar)
-            val a: Int; val b: Int
-            if (!prevT.isNaN() && t - prevT in 0f..2f) { a = (prevT + 0.5f).toInt() + 1; b = (t + 0.5f).toInt() }
-            else { a = (t + 0.5f).toInt(); b = a }
-            for (tx in max(a, 0)..min(b, w - 1)) {
-                if (dz > z[tx]) { z[tx] = dz; row[tx] = src[base + x] }
+            var xs = x.toFloat()
+            for (it in 0 until 4) {
+                val i0 = xs.toInt().coerceIn(0, w - 1); val i1 = min(i0 + 1, w - 1); val t = (xs - i0).coerceIn(0f, 1f)
+                val dz = d[base + i0] * (1 - t) + d[base + i1] * t
+                xs = (x - k * (dz - conv)).coerceIn(0f, last)
             }
-            prevT = t
-        }
-        // huecos (lo que tapaba lo de adelante): se completan con la textura del fondo, reflejada desde el lado
-        // más lejano, en vez de estirar un solo pixel (eso dejaba rayas)
-        var x = 0
-        while (x < w) {
-            if (z[x] >= 0f) { x++; continue }
-            var e = x
-            while (e < w && z[e] < 0f) e++
-            val l = x - 1; val r = e
-            val fromLeft = when { l < 0 && r >= w -> true; l < 0 -> false; r >= w -> true; else -> z[l] <= z[r] }
-            for (i in x until e) {
-                row[i] = if (fromLeft) {
-                    if (l < 0) 0xff000000.toInt() else { var j = l - (i - l - 1); if (j < 0 || z[j] < 0f || z[j] > z[l] + 0.05f) j = l; row[j] }
-                } else {
-                    var j = r + (r - i - 1); if (j >= w || z[j] < 0f || z[j] > z[r] + 0.05f) j = r; row[j]
-                }
-                hole[y * w + i] = true
-            }
-            x = e
+            val x0 = xs.toInt(); val x1 = min(x0 + 1, w - 1); val t = xs - x0
+            val a = src[base + x0]; val b = src[base + x1]
+            val r = (((a shr 16) and 255) * (1 - t) + ((b shr 16) and 255) * t + 0.5f).toInt()
+            val g = (((a shr 8) and 255) * (1 - t) + ((b shr 8) and 255) * t + 0.5f).toInt()
+            val bl = ((a and 255) * (1 - t) + (b and 255) * t + 0.5f).toInt()
+            out[base + x] = (0xff shl 24) or (r shl 16) or (g shl 8) or bl
         }
     }
 
-    /** Suaviza en vertical solo lo rellenado, para que no se note el corte entre filas. */
-    fun smoothHoles(img: IntArray, hole: BooleanArray, w: Int, h: Int) {
-        val r = 3
-        val copy = img.copyOf()
-        for (y in 0 until h) for (x in 0 until w) {
-            val i = y * w + x
-            if (!hole[i]) continue
-            var sr = 0; var sg = 0; var sb = 0; var c = 0
-            for (dy in -r..r) {
-                for (dx in -1..1) {
-                    val yy = y + dy; val xx = x + dx
-                    if (yy < 0 || yy >= h || xx < 0 || xx >= w) continue
-                    val p = copy[yy * w + xx]
-                    sr += (p shr 16) and 255; sg += (p shr 8) and 255; sb += p and 255; c++
-                }
+    private fun blur(a: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+        val t = FloatArray(a.size); val o = FloatArray(a.size)
+        val n = (2 * r + 1).toFloat()
+        for (y in 0 until h) {
+            var s = 0f; val b = y * w
+            for (x in -r..r) s += a[b + x.coerceIn(0, w - 1)]
+            for (x in 0 until w) {
+                t[b + x] = s / n
+                s += a[b + (x + r + 1).coerceIn(0, w - 1)] - a[b + (x - r).coerceIn(0, w - 1)]
             }
-            img[i] = (0xff shl 24) or ((sr / c) shl 16) or ((sg / c) shl 8) or (sb / c)
         }
+        for (x in 0 until w) {
+            var s = 0f
+            for (y in -r..r) s += t[y.coerceIn(0, h - 1) * w + x]
+            for (y in 0 until h) {
+                o[y * w + x] = s / n
+                s += t[(y + r + 1).coerceIn(0, h - 1) * w + x] - t[(y - r).coerceIn(0, h - 1) * w + x]
+            }
+        }
+        return o
     }
 
     /** Imagen del tamaño de la pantalla (apaisada) con cada ojo centrado en su mitad, como la muestra la app. */

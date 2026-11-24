@@ -258,16 +258,87 @@ class MainActivity : Activity() {
         pm.menu.add(0, 2, 1, "Enderezar automático").apply { isCheckable = true; isChecked = level.auto }
         pm.menu.add(0, 3, 2, "Girar la imagen")
         pm.menu.add(0, 4, 3, if (settings.visibility == View.VISIBLE) "Cerrar calibración" else "Calibración")
+        pm.menu.add(0, 6, 4, "Guardar calibración en un archivo")
+        pm.menu.add(0, 7, 5, "Cargar calibración de un archivo")
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> startActivity(android.content.Intent(this, Photo3DActivity::class.java))
                 2 -> btnLevelRef?.performClick()
                 3 -> btnRotate.performClick()
                 4 -> btnSettings.performClick()
+                6 -> exportCalibration()
+                7 -> {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(android.content.Intent.CATEGORY_OPENABLE); type = "*/*"
+                    }, REQ_IMPORT_CAL)
+                }
             }
             true
         }
         pm.show()
+    }
+
+    // ---------- Guardar y cargar la calibración ----------
+
+    private val REQ_IMPORT_CAL = 31
+
+    /** Guarda en Descargas un archivo con toda la calibración (mover, rotar, zoom y separación por ojo, giro y enderezar). */
+    private fun exportCalibration() {
+        saveCalibration()
+        val o = org.json.JSONObject()
+        for ((k, v) in prefs.all) {
+            when (v) {
+                is Float -> o.put(k, org.json.JSONObject().put("t", "f").put("v", v.toDouble()))
+                is Int -> o.put(k, org.json.JSONObject().put("t", "i").put("v", v))
+                is Boolean -> o.put(k, org.json.JSONObject().put("t", "b").put("v", v))
+                is String -> o.put(k, org.json.JSONObject().put("t", "s").put("v", v))
+                is Long -> o.put(k, org.json.JSONObject().put("t", "l").put("v", v))
+            }
+        }
+        val json = org.json.JSONObject().put("app", "dualcam3d").put("version", 1).put("calibracion", o).toString(2)
+        try {
+            val v = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "DualCam3D-calibracion-${stamp()}.json")
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download")
+            }
+            val u = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v) ?: throw IllegalStateException("no se pudo crear el archivo")
+            contentResolver.openOutputStream(u)?.use { it.write(json.toByteArray()) }
+            toast("Calibración guardada en Descargas (${v.getAsString(MediaStore.MediaColumns.DISPLAY_NAME)})")
+        } catch (e: Exception) { toast("No se pudo guardar la calibración: ${e.message}") }
+    }
+
+    private fun importCalibration(u: android.net.Uri) {
+        try {
+            val txt = contentResolver.openInputStream(u)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: throw IllegalStateException()
+            val root = org.json.JSONObject(txt)
+            if (root.optString("app") != "dualcam3d") throw IllegalArgumentException("no es un archivo de calibración de DualCam 3D")
+            val o = root.getJSONObject("calibracion")
+            val e = prefs.edit()
+            for (k in o.keys()) {
+                val it = o.getJSONObject(k)
+                when (it.getString("t")) {
+                    "f" -> e.putFloat(k, it.getDouble("v").toFloat())
+                    "i" -> e.putInt(k, it.getInt("v"))
+                    "b" -> e.putBoolean(k, it.getBoolean("v"))
+                    "s" -> e.putString(k, it.getString("v"))
+                    "l" -> e.putLong(k, it.getLong("v"))
+                }
+            }
+            e.commit()
+            renderer.quarterTurns = prefs.getInt("giro", 1)
+            level.auto = prefs.getBoolean("auto_nivel", false)
+            if (!level.auto) renderer.levelDeg = 0f
+            loadCalibration()
+            toast("Calibración cargada")
+        } catch (ex: Exception) { toast("No se pudo cargar la calibración: ${ex.message}") }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMPORT_CAL && resultCode == RESULT_OK) data?.data?.let { importCalibration(it) }
     }
 
     // ---------- Panel de ajustes / calibración ----------
